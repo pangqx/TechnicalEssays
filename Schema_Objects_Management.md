@@ -23,8 +23,10 @@
 3. 创建影子表（interim table）。影子表的索引、约束、权限、触发器不需要创建，第7步会自动从原表复制。
 4. （可选）如果用ROWID方式对一个分区表在线重定义，影子表需要enable row movement: `ALTER TABLE ... ENABLE ROW MOVEMENT;`
 5. （可选）提升对一个大表在线重定义时的性能：
-`ALTER SESSION FORCE PARALLEL DML PARALLEL N;`
-`ALTER SESSION FORCE PARALLEL QUERY PARALLEL N;`
+```
+    ALTER SESSION FORCE PARALLEL DML PARALLEL N;
+    ALTER SESSION FORCE PARALLEL QUERY PARALLEL N;
+```
 6. 调用存储过程 START_REDEF_TABLE 开始在线重定义。
 7. 调用存储过程 COPY_TABLE_DEPENDENTS 自动复制依赖原表的对象（索引、约束、权限、触发器、统计信息）到影子表。
 8. 调用存储过程 SYNC_INTERIM_TABLE 同步增量数据到影子表，可以多次执行。
@@ -33,15 +35,15 @@
 
 
 ### 示例
-The original table, named emp, is defined in the hr schema as follows:
+- 原表 hr.emp 定义:
 ```
-  empno     NUMBER(4,0)  PRIMARY KEY,
-  ename     VARCHAR2(10) NOT NULL,
-  job       VARCHAR2(9),
-  hiredate  DATE         NOT NULL,
-  sal       NUMBER(7,2),
-  deptno    NUMBER(2,0)
+  empno     NUMBER(4,0)  PRIMARY KEY
+  ename     VARCHAR2(10) NOT NULL
+  job       VARCHAR2(9)
+  hiredate  DATE         NOT NULL
+  sal       NUMBER(7,2)
 ```
+- 验证表 hr.emp 是否支持在线重定义
 ```
 BEGIN
   DBMS_REDEFINITION.CAN_REDEF_TABLE(
@@ -51,19 +53,22 @@ BEGIN
 --  options_flag => DBMS_REDEFINITION.CONS_USE_ROWID);
 END;
 ```
+- 创建影子表 hr.emp_int，按字段empno分区
 ```
-CREATE TABLE emp_int
+CREATE TABLE hr.emp_int
 ( empno     NUMBER(4,0),
   ename     VARCHAR2(10),
   job       VARCHAR2(9),
   hiredate  DATE,
   sal       NUMBER(7,2),
-  deptno    NUMBER(2,0)
 )
 PARTITION BY RANGE(empno)
-(PARTITION emp1000 VALUES LESS THAN (1000),
-PARTITION emp2000 VALUES LESS THAN (2000));
+(
+    PARTITION emp1000 VALUES LESS THAN (1000),
+    PARTITION emp2000 VALUES LESS THAN (2000)
+);
 ```
+- 开始在线重定义
 ```
 BEGIN
   DBMS_REDEFINITION.START_REDEF_TABLE(
@@ -71,11 +76,13 @@ BEGIN
     orig_table   => 'emp',
     int_table    => 'emp_int',
     col_mapping  => NULL,
+--  col_mapping  => 'empno empno, ename ename, job job, hiredate hiredate, sal*1.2 sal',
     options_flag => DBMS_REDEFINITION.CONS_USE_PK,
 --  options_flag => DBMS_REDEFINITION.CONS_USE_ROWID,
     enable_rollback => FALSE);
 END;
 ```
+- 将依赖表的对象从原表拷贝到影子表
 ```
 DECLARE
 num_errors PLS_INTEGER;
@@ -93,6 +100,7 @@ BEGIN
     num_errors       => num_errors);
 END;
 ```
+- 同步原表的增量数据到影子表
 ```
 BEGIN 
   DBMS_REDEFINITION.SYNC_INTERIM_TABLE(
@@ -101,6 +109,7 @@ BEGIN
     int_table  => 'emp_int');
 END;
 ```
+- 完成在线重定义，原表会短暂锁表
 ```
 BEGIN
   DBMS_REDEFINITION.FINISH_REDEF_TABLE(
@@ -110,21 +119,36 @@ BEGIN
     dml_lock_timeout => NULL);
 END;
 ```
-
+- 删除影子表
+```
+drop table hr.emp_int;
+```
+- （如有必要）中断在线重定义，在START_REDEF_TABLE之后及FINISH_REDEF_TABLE之前执行
+```
+BEGIN 
+  DBMS_REDEFINITION.ABORT_REDEF_TABLE(
+    uname      => 'hr', 
+    orig_table => 'emp', 
+    int_table  => 'emp_int');
+END;
+```
 
 ### 监控在线重定义过程
-- V$ONLINE_REDEF
+- V\$ONLINE_REDEF
+```
+SQL> SELECT OPERATION, SUBOPERATION, PROGRESS FROM V$ONLINE_REDEF;
+OPERATION                SUBOPERATION         PROGRESS
+----------------------   ------------------   ----------------
+COPY_TABLE_DEPENDENTS    copy the indexes     step 3 out of 7
+```
 - DBA_REDEFINITION_STATUS
+```
+SQL> SELECT BASE_TABLE_NAME,  INT_TABLE_NAME, OPERATION, STATUS, RESTARTABLE, ACTION FROM DBA_REDEFINITION_STATUS;
 
-
-
-
-
-### 中断在线重定义
-
-
-
-### 回滚
+BASE_TABLE_NAME INT_OBJ_NAME OPERATION          STATUS  RESTARTABLE ACTION
+--------------- ------------ ------------------ ------- ----------- ---------
+EMP             EMP_INT      SYNC_INTERIM_TABLE FAILED  Y           Fix error
+```
 
 
 
