@@ -33,6 +33,83 @@
 
 
 ### 示例
+The original table, named emp, is defined in the hr schema as follows:
+```
+  empno     NUMBER(4,0)  PRIMARY KEY,
+  ename     VARCHAR2(10) NOT NULL,
+  job       VARCHAR2(9),
+  hiredate  DATE         NOT NULL,
+  sal       NUMBER(7,2),
+  deptno    NUMBER(2,0)
+```
+```
+BEGIN
+  DBMS_REDEFINITION.CAN_REDEF_TABLE(
+    uname        => 'hr',
+    tname        => 'emp',
+    options_flag => DBMS_REDEFINITION.CONS_USE_PK);
+--  options_flag => DBMS_REDEFINITION.CONS_USE_ROWID);
+END;
+```
+```
+CREATE TABLE emp_int
+( empno     NUMBER(4,0),
+  ename     VARCHAR2(10),
+  job       VARCHAR2(9),
+  hiredate  DATE,
+  sal       NUMBER(7,2),
+  deptno    NUMBER(2,0)
+)
+PARTITION BY RANGE(empno)
+(PARTITION emp1000 VALUES LESS THAN (1000),
+PARTITION emp2000 VALUES LESS THAN (2000));
+```
+```
+BEGIN
+  DBMS_REDEFINITION.START_REDEF_TABLE(
+    uname        => 'hr', 
+    orig_table   => 'emp',
+    int_table    => 'emp_int',
+    col_mapping  => NULL,
+    options_flag => DBMS_REDEFINITION.CONS_USE_PK,
+--  options_flag => DBMS_REDEFINITION.CONS_USE_ROWID,
+    enable_rollback => FALSE);
+END;
+```
+```
+DECLARE
+num_errors PLS_INTEGER;
+BEGIN
+  DBMS_REDEFINITION.COPY_TABLE_DEPENDENTS(
+    uname            => 'hr', 
+    orig_table       => 'emp',
+    int_table        => 'emp_int',
+    copy_indexes     => DBMS_REDEFINITION.CONS_ORIG_PARAMS, 
+    copy_triggers    => TRUE, 
+    copy_constraints => TRUE, 
+    copy_privileges  => TRUE, 
+    copy_statistics  => TRUE,
+    ignore_errors    => FALSE, 
+    num_errors       => num_errors);
+END;
+```
+```
+BEGIN 
+  DBMS_REDEFINITION.SYNC_INTERIM_TABLE(
+    uname      => 'hr', 
+    orig_table => 'emp', 
+    int_table  => 'emp_int');
+END;
+```
+```
+BEGIN
+  DBMS_REDEFINITION.FINISH_REDEF_TABLE(
+    uname      => 'hr', 
+    orig_table => 'emp', 
+    int_table  => 'emp_int',
+    dml_lock_timeout => NULL);
+END;
+```
 
 
 ### 监控在线重定义过程
